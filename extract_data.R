@@ -1,6 +1,9 @@
-##########################################################
+
+# Movie Lens Project Code 
+
+########################################################
+
 # Create edx set, validation set (final hold-out test set)
-##########################################################
 
 # Note: this process could take a couple of minutes
 
@@ -25,11 +28,7 @@ ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings
 movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
 colnames(movies) <- c("movieId", "title", "genres")
 
-# if using R 3.6 or earlier:
-movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
-                                           title = as.character(title),
-                                           genres = as.character(genres))
-# if using R 4.0 or later:
+# I am using R 4.1.0, this is code for R 4.0 or later:
 movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
                                            title = as.character(title),
                                            genres = as.character(genres))
@@ -53,3 +52,6 @@ removed <- anti_join(temp, validation)
 edx <- rbind(edx, removed)
 
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
+save(edx, file = "movielens_edx.Rda")
+save(validation, file = "movielens_validation.Rda")
+
