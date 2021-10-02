@@ -126,20 +126,20 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
   
   # Average rating
     avg_rating <- mean(train_set$rating)
-    l = 2
+    l=15.25
+    
+  # Modeling movie bias with regularization
+    
+    movie_bias <- train_set %>% 
+      group_by(movieId) %>%
+      summarize(mv_b = sum(rating - avg_rating)/(n()+l))
     
   # Modeling user bias with regularization
     
-    user_bias <- train_set %>% 
+    user_bias <- train_set %>%
+      left_join(movie_bias, by="movieId") %>%
       group_by(userId) %>%
-      summarize(usr_b = sum(rating - avg_rating)/(n()+l))
-    
-  # Modeling movie bias with regularization
-     
-    movie_bias <- train_set %>% 
-      left_join(user_bias, by="userId") %>%
-      group_by(movieId) %>%
-      summarize(mv_b = sum(rating - usr_b - avg_rating)/(n()+l))
+      summarize(usr_b = sum(rating - mv_b - avg_rating)/(n()+l))
   
   # Modeling genre bias
     genre_bias <- train_set %>% 
@@ -148,7 +148,7 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
       group_by(genres) %>%
       summarize(gnr_b = sum(rating - usr_b - mv_b - avg_rating)/(n()+l))
 
-  # Modeling years since release bias
+    
     # Trying loess
     
     trial_index <- createDataPartition(y = train_set$rating, times = 1, p = 0.06, 
@@ -176,16 +176,46 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
     ysr_bias$ysr_b[1] = ysr_bias$ysr_b[2]
    
     ysr_bias$ysr_b[96] = ysr_bias$ysr_b[95]
-    
-    
-# Making predictions
+
+    # # # Optimize lamda for regularization
+    # lambdas <- seq(0, 20, 0.25)
+    # 
+    # rmses <- sapply(lambdas, function(l){
+    # 
+    #   movie_bias <- train_set %>% 
+    #     group_by(movieId) %>%
+    #     summarize(mv_b = sum(rating - avg_rating)/(n()+l))
+    #   
+    #   user_bias <- train_set %>%
+    #     left_join(movie_bias, by="movieId") %>%
+    #     group_by(userId) %>%
+    #     summarize(usr_b = sum(rating - mv_b - avg_rating)/(n()+l))
+    # 
+    #   genre_bias <- train_set %>%
+    #     left_join(user_bias, by="userId") %>%
+    #     left_join(movie_bias, by="movieId") %>%
+    #     group_by(genres) %>%
+    #     summarize(gnr_b = sum(rating - usr_b - mv_b - avg_rating)/(n()+l))
+    # 
+    # 
+    #   y_hat <- left_join(test_set,user_bias) %>%
+    #     left_join(.,movie_bias,by="movieId") %>%
+    #     left_join(.,genre_bias,by="genres") %>%
+    #     mutate(p_rating = avg_rating + usr_b + mv_b + gnr_b)
+    # 
+    #   return(RMSE(test_set$rating, y_hat$p_rating))
+    # })
+    # 
+    # qplot(lambdas, rmses)
+
+# Making final predictions
     
     y_hat <- left_join(test_set,user_bias) %>%
-      left_join(.,movie_bias,by="movieId") %>% 
-      left_join(.,genre_bias,by="genres") %>%
-      mutate(ysr = year(as_datetime(timestamp))-year) %>% 
-      left_join(.,ysr_bias,by="ysr") %>% 
-      mutate(p_rating = avg_rating + usr_b + mv_b + gnr_b) 
+          left_join(.,movie_bias,by="movieId") %>%
+          left_join(.,genre_bias,by="genres") %>%
+          mutate(ysr = year(as_datetime(timestamp))-year) %>%
+          left_join(.,ysr_bias,by="ysr") %>%
+          mutate(p_rating = avg_rating + usr_b + mv_b + gnr_b)
 
     # Make sure predictions are within rating range
     
@@ -195,15 +225,16 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
 
     y_hat %>% select(p_rating) %>% summary 
  
+    y_hat %>% 
   # Inspect errors
     
     error_hist <- y_hat %>% mutate(error = rating - p_rating) %>% ggplot(aes(error)) + geom_histogram()
-    
+    error_hist
     y_hat %>% mutate(error = abs(rating - p_rating)) %>% 
-      select(usr_b,mv_b,gnr_b,ysr_b,p_rating,rating,error) %>%
+      select(userId,usr_b,mv_b,gnr_b,ysr_b,p_rating,rating,error) %>%
        arrange(desc(error)) %>% top_n(10)
 
-  
+  train_set %>% filter(userId==4043) %>% ggplot(aes(rating)) + geom_histogram()
 # Calculate RMSE
   
   RMSE <- function(ratings, p_hat){
@@ -211,7 +242,6 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
   }
   
   RMSE(test_set$rating, y_hat$p_rating)
- 
- 
+
  
   
