@@ -101,7 +101,7 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
   # Relationship rating - years since release
      edx_y %>% mutate(ysr = year(as_datetime(timestamp))-year) %>% 
        group_by(ysr) %>% summarise(avg_rating = mean(rating)) %>% 
-       ggplot(aes(ysr, rating)) + geom_point(alpha = 0.5,)
+       ggplot(aes(ysr, avg_rating)) + geom_point(alpha = 0.5,)
      
      # Can the function be modeled by knn?
      fit_ysr_knn <- train_set %>% mutate(ysr = year(as_datetime(timestamp))-year) %>% 
@@ -126,63 +126,83 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
   
   # Average rating
     avg_rating <- mean(train_set$rating)
+    l = 2
     
-  # Modeling user bias
+  # Modeling user bias with regularization
     
     user_bias <- train_set %>% 
       group_by(userId) %>%
-      summarise(usr_b = mean(rating - avg_rating))
+      summarize(usr_b = sum(rating - avg_rating)/(n()+l))
     
-  # Modeling movie bias  
+  # Modeling movie bias with regularization
      
     movie_bias <- train_set %>% 
+      left_join(user_bias, by="userId") %>%
       group_by(movieId) %>%
-      summarise(mv_b = mean(rating - avg_rating))
+      summarize(mv_b = sum(rating - usr_b - avg_rating)/(n()+l))
   
   # Modeling genre bias
     genre_bias <- train_set %>% 
+      left_join(user_bias, by="userId") %>%
+      left_join(movie_bias, by="movieId") %>%
       group_by(genres) %>%
-      summarise(gnr_b = mean(rating - avg_rating))
-    
+      summarize(gnr_b = sum(rating - usr_b - mv_b - avg_rating)/(n()+l))
+
   # Modeling years since release bias
+    # Trying loess
     
-    fit_ysr_knn <- train_set[1:8000,] %>% 
-      mutate(ysr = year(as_datetime(timestamp))-year) %>%
-      train(rating~ysr, data =., method = "knn")
-    fit_ysr_knn
-  ysr_range <- seq(1,80,1)
-    y_hat_ysr <- predict(fit_ysr_knn,ysr_range)
-    gg
-    ysr_bias <- as_data_frame(y_hat_ysr)%>% mutate(ysr= ysr_range, ysr_b = y_hat_ysr - avg_rating)
+    trial_index <- createDataPartition(y = train_set$rating, times = 1, p = 0.06, 
+                        list = FALSE)
+    trial_set <- train_set[trial_index,]
+    nrow(trial_set)
+    # Timing computation time
+    # Start the clock!
+    ptm <- proc.time()
+    span <- 0.35
+    fit_1 <- trial_set %>% 
+      mutate(ysr = year(as_datetime(timestamp))-year) %>% 
+      loess(rating ~ ysr, degree=1, span = span, data=.)
     
-  # Regularisation
-    # lambdas <- seq(0, 10, 0.25)
-    # 
-    # rmses <- sapply(lambdas, function(l){
-    #   
-    #   
-    #   b_i <- train_set %>% 
-    #     group_by(movieId) %>%
-    #     summarize(b_i = sum(rating - )/(n()+l))
-    #   
-    #   b_u <- train_set %>% 
-    #     left_join(b_i, by="movieId") %>%
-    #     group_by(userId) %>%
-    #     summarize(b_u = sum(rating - b_i - mu)/(n()+l))
-    #   
-    #   predicted_ratings <- 
-    #     test_set %>% 
-    #     left_join(b_i, by = "movieId") %>%
-    #     left_join(b_u, by = "userId") %>%
-    #     mutate(pred = mu + b_i + b_u) %>%
-    #     pull(pred)
-    #   
-    #   return(RMSE(predicted_ratings, test_set$rating))
-    # })
+    # Stop the clock
+    time <- proc.time() - ptm
+    time[3]
+    
+    ysr_range <- seq(-2,93,1)
+    
+    ysr_bias <-  data.frame(ysr = ysr_range, ysr_b = predict(fit_1,ysr_range)-avg_rating)
+  
+    # Fill in the N/As
+    
+    ysr_bias$ysr_b[1] = ysr_bias$ysr_b[2]
+   
+    ysr_bias$ysr_b[96] = ysr_bias$ysr_b[95]
+    
     
 # Making predictions
     
-    # 
+    y_hat <- left_join(test_set,user_bias) %>%
+      left_join(.,movie_bias,by="movieId") %>% 
+      left_join(.,genre_bias,by="genres") %>%
+      mutate(ysr = year(as_datetime(timestamp))-year) %>% 
+      left_join(.,ysr_bias,by="ysr") %>% 
+      mutate(p_rating = avg_rating + usr_b + mv_b + gnr_b) 
+
+    # Make sure predictions are within rating range
+    
+    y_hat$p_rating[y_hat$p_rating<0] = 0
+    
+    y_hat$p_rating[y_hat$p_rating>5] = 5
+
+    y_hat %>% select(p_rating) %>% summary 
+ 
+  # Inspect errors
+    
+    error_hist <- y_hat %>% mutate(error = rating - p_rating) %>% ggplot(aes(error)) + geom_histogram()
+    
+    y_hat %>% mutate(error = abs(rating - p_rating)) %>% 
+      select(usr_b,mv_b,gnr_b,ysr_b,p_rating,rating,error) %>%
+       arrange(desc(error)) %>% top_n(10)
+
   
 # Calculate RMSE
   
@@ -190,7 +210,7 @@ q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= d
     sqrt(mean((ratings - p_hat)^2))
   }
   
-
+  RMSE(test_set$rating, y_hat$p_rating)
  
  
  
