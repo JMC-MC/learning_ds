@@ -1,33 +1,203 @@
 ---
 title: "MovieLens Project"
-output: html_notebook
+output:
+  pdf_document: default
+  html_notebook: default
 ---
 
 ## Introduction
 
-A section that describes the dataset and summarizes the goal of the project and key steps that were performed
+This project uses the edx Movielens data set to train and validate a model for predicting movie ratings. The purpose of this model is to allow movie streaming service to provide useful movie recommendations to their users.
+
+The following documents describes the methods, analysis and results of this project. It describes how modeling biases within the data is a surprisingly effective approach and can achieve a predictive model with an RMSE of around 0.8645.
+
+The edx Movielens training data set contains movie ratings from 69,878 users and 10,677 movies. A validation data set containing 10% of the original data was extracted and used for final validation once a model had been established.
+
+This document concludes by describing some of the shortcomings of the model and ways in which higher levels of accuracy could be achieved.
 
 ## Methods & Analysis
+
 ### Date Exploration
 
+A basic plot of ratings density within the edx data frame shows that ratings range from 0 to 5 in increments of 0.5. The mean score for a review is 3.5 which is a good starting point for make predictions however the final model improves on this approach.
 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+load("movielens_edx.Rda")
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(lubridate)
+library(tinytex)
+edx %>% group_by(rating) %>%
+      ggplot(aes(rating)) + geom_density(fill = "#76B7B2",color = "#76B7B2", alpha = 0.5) + geom_vline(xintercept=c(4,3.5), linetype=c("dashed","dashed"), color = c("black","black")) + annotate(geom = "text", label = c("Mean = 3.5", "Median = 4"), x = c(3.5, 4), y = c(2.5, 2.5), angle = 90, vjust = 1.5) + labs(title= "Rating Density", y = "density") + theme_minimal()
 
-A section that explains the process and techniques used, including data cleaning, data exploration and visualization, insights gained, and your modeling approach
+summary(edx$rating)
+```
 
-### Preprocessing 
+Looking at the number of reviews posted by each users reveals that the majority of people have reviewed between 1-30 movies. There is a positive skew and a long tail to this distribution and therefore a significant amount of reviews associated with single users. Although there is sufficient data to justify using "userId" as a predictor it is important to note that there is significant variance in the number of reviews per user.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+edx %>% group_by(userId) %>% summarise(no_reviews = n()) %>% 
+      ggplot(aes(no_reviews)) + geom_density(fill = "#4e79a7",color = "#4e79a7", alpha = 0.5) + xlim(0,2000) + labs(title= "Number of Reviews by userId", y = "density") + theme_minimal()
+```
+
+A density plot of reviews by "movieId' shows a similar distribution to "userID" with a lower peak.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+edx %>% group_by(movieId) %>% summarise(no_reviews = n()) %>% 
+      ggplot(aes(no_reviews)) + geom_density(fill = "#e15759",color = "#e15759", alpha = 0.5) + xlim(0,2000) + 
+  labs(title= "Number of Reviews by movieId", y = "density") + 
+  theme_minimal()
+```
+
+Further analysis of the "movieID" and "title" data reveals that some data cleaning is required. The data frame below shows that one title has two "movieId"s. How this issue was corrected is also shown in the code chunk.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+ # Do movies with the same id have different titles
+        unq_mID <- length(unique(edx$movieId)) 
+        unq_title <-length(unique(edx$title)) 
+        diff <- unq_mID - unq_title
+      # 1 more ID than there is titles, suggesting there is a movie with two IDs
+        ax <- edx %>% group_by(title) %>% summarise(diff = diff(movieId)) %>% filter(diff > 0)
+        edx %>% filter(title == first(ax$title)) %>% group_by(movieId) %>% 
+        summarise(no_ratings = n(),title = first(title))
+      #There are two movieIDs for War of the Worlds (2005)
+  # Function to adjust movieId for "War of the Worlds (2005)"    
+    WotW_corr <- function(df) {
+    df %>% mutate(movieId = replace(movieId, movieId == 64997, 34048))
+  }
+```
+
+We can also see that the title column contains year information in brackets. Reference to open source data shows that this is the year the the movie was released. In order to analyse this data it needs to be extracted from the title column. The code chunk below extracts the year data a creates a new column, this code was included in a function so that is could be easily applied to both the validation and training data sets.
+
 ```{r}
+ # The title column contains year data. Check this is true for every title.
+      yr_pattern <- "\\(\\d{4}\\)"
+      title_check <- edx %>% group_by(title) %>% 
+        filter(str_detect(title,yr_pattern,negate = TRUE))
+    # title check is empty proving that all titles have year data .
+      
+#Function extracting movie year
+   ext_year <- function(df) {
+    df %>% mutate(year = str_sub(str_extract(title,yr_pattern), start = 2L, end = -2L)) %>% 
+      mutate(year = as.integer(year))
+  }
+```
+
+Once the year data has been extracted it is possible to explore the relationship between the "year" and "rating". The plot below shows that there is a slight negative correlation (-0.121) between rating and years.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(1)
+ext_year <- function(df) {
+    df %>% mutate(year = str_sub(str_extract(title,yr_pattern), start = 2L, end = -2L)) %>% 
+      mutate(year = as.integer(year))
+}
+edx_y <- ext_year(edx)
+edx_y %>% createDataPartition(y = edx_y$rating, times = 1, p = 0.01, list = FALSE) %>% 
+  edx_y[.]%>%ggplot(aes(year,rating)) + 
+  geom_jitter(color = "#59a14f", height = 0.5, alpha = 0.08,) + 
+  geom_smooth(color = "#BAB0AC", method = "lm", se = FALSE) + labs(title= "Scatter of Ratings vs Year") + theme_minimal()
 
 ```
 
+When we look at the time of rating we can see that not all films were reviewed in the year that they were released. The relationship between year and rating maybe affected by a bias relating to time since release. This is likely to be true for older films as those that are still available for consumption decades after their release are likely to be 'classics'. In order to further investigate this hypothesis we can look as the relationship between the years since the film was released and rating.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(12)
+edx_y %>%  createDataPartition(y = edx_y$rating, times = 1, p = 0.01, list = FALSE) %>% edx_y[.] %>% mutate(ysr = year(as_datetime(timestamp))-year) %>% ggplot(aes(ysr,rating)) + geom_jitter(color = "#f28e2b", height = 0.5, alpha = 0.08,) +  geom_smooth(color = "black", method="loess", se=FALSE) +  annotate(geom = "text", x = 4 , y = 2.3, label = "post release dip", hjust = "left") + annotate(geom = "curve", x = 7, y = 2.7, xend = 9, yend = 3.4, curvature = .3, arrow = arrow(length = unit(2, "mm"))) +  annotate(geom = "text", x = 59 , y = 5.2, label = "classic peak", hjust = "left") + annotate(geom = "curve", x = 58, y = 5, xend = 55, yend = 4, curvature = .3, arrow = arrow(length = unit(2, "mm"))) + labs(title= "Scatter of Ratings vs Years Since Release") + theme_minimal()
+```
+
+Using a small sample of the data and loess smooth we can see that there is a non-linear relationship between years since release and rating. It appears that films drop in popularity slightly over the first 5 years. Ratings then increase up to around 55 years after release before begin to drop again. This relationship can be observed across a number of samples and is used in the final model.
+
+Looking at the "genres" column we can see that there are a number of combinations of genres. In order to try and understand the relationship between genre and and rating we can look at a box plot of single genres.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+edx %>% filter(!str_detect(genres,"\\|")) %>% group_by(genres) %>%  ggplot(aes(genres,rating)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + labs(title= "Genre Box Plot") 
+```
+
+The box plot above suggests that ratings have a relationship with genre and this maybe able to be represented in our model as a genre bias.
+
+### Preprocessing
+
+In order to maximize model accuracy and extract nested data from the data set the following preprocessing was carried out;
+
+1.  Ensure all unique "title" entries have a single "movieId"
+2.  Extract year data from the title column.
+3.  Generate a test and training data set for model development.
+4.  Generate a smaller subset of data in order to reduce computation time for the loess function.
+
 ### Model Selection
+
+There are 4 elements to the model, 3 elements adopt a basic approach of representing biases within the data by stratifying and calculating the difference from and average. These elements are movie bias (mv_b), user bias (usr_b) and genre bias (gnr_b).
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# Modeling movie bias with regularization
+    
+    movie_bias <- edx_y %>%
+      mutate(ysr = year(as_datetime(timestamp))-year) %>%
+      left_join(ysr_bias,by = "ysr") %>%
+      group_by(movieId) %>%
+      summarize(mv_b = sum(rating - ysr_b)/(n()+l))
+    
+  # Modeling user bias with regularization
+    
+    user_bias <- edx_y %>%
+      mutate(ysr = year(as_datetime(timestamp))-year) %>%
+      left_join(ysr_bias,by = "ysr") %>%
+      left_join(movie_bias, by="movieId") %>%
+      group_by(userId) %>%
+      summarize(usr_b = sum(rating - mv_b - ysr_b)/(n()+l))
+  
+  # Modeling genre bias with regularization
+    genre_bias <- edx_y %>% 
+      mutate(ysr = year(as_datetime(timestamp))-year) %>%
+      left_join(ysr_bias,by = "ysr") %>%
+      left_join(user_bias, by="userId") %>%
+      left_join(movie_bias, by="movieId") %>%
+      group_by(genres) %>% summarize(gnr_b = sum(rating - usr_b - mv_b - ysr_b)/(n()+l))
+
+```
+
+This is approach was selected in order to reduce processing requirements and the time taken for development and execution.
+
+The 4th element of the model used loess to describe a non-linear relationship between 'years since release and rating' this method was selected as it provided a good level of accuracy when compared to other more resource intensive models such and KNN.
+
+```{r eval=FALSE, include=FALSE}
+  # Using loess to smooth YSR data and predict a rating for each value of YSR. 
+     
+     trial_index <- createDataPartition(y = train_set$rating, times = 1, p = 0.10, 
+                                        list = FALSE)
+     trial_set <- train_set[trial_index,]
+
+     span <- 0.35
+     fit_1 <- trial_set %>% 
+       mutate(ysr = year(as_datetime(timestamp))-year) %>% 
+       loess(rating ~ ysr, degree=1, span = span, data=.)
+
+     ysr_range <- seq(-2,93,1)
+     
+     ysr_bias <- train_set %>% 
+       mutate(ysr = year(as_datetime(timestamp))-year, ysr_p = predict(fit_1,ysr)) %>%
+       group_by(ysr) %>% summarise(ysr_b = mean(ysr_p))
+     
+```
+
+A trial_set was created in order to reduce processing time and maintain as much accuracy as possible. After some experimentation a 10% sub set of the training set was selected with a 0.35 span parameter.
+
+The final outcome of the YSR modeling was then used as the average with which the 3 biases were determined.
 
 ### Variable importance
 
+The movie bias variable is given the highest level of importance within the model. During development higher levels of importance were given user and genre bias however this increased RMSE when trialed using the 'test_set'.
+
+Regularisation is for each bias elements of the model in order to reduce the importance of calculations that contains fewer data points. The model was tuned for lamda and a value of 5 was found to achieve the highest level of accuracy.
 
 ## Results
 
-A section that presents the modeling results and discusses the model performance
+When the final model is used to make predictions for the validation data set a **RMSE of 0.8645887** is achieved. It is important to understand this result within the context of the challenge. When predicting human behaviour a high level of accuracy is unlikely to be achieved, however the purpose of this model does not require perfect accuracy. When recommending movies we know that a variance of 0.5 on the rating scale is unlikely to have a significant impact.The RMSE can undoubtedly be reduced further however this must be balanced with processor resource requirements.
 
 ## Conclusion
 
-A section that gives a brief summary of the report, its limitations and the future work. 
+Creating a movie recommendation model using a 'biased' based approach can provided good results. The processing requirements of the model need to be balanced with the demand for accuracy. With a large data set such as Movielens some approaches can be quickly ruled out because of the resources requirements. For example KNN proved to be very slow and showed very minimal increase in accuracy.
+
+Further development of this model could include the use of matrix factorization and the identification of cohorts within the data. This type of approach would allow for user biases to be more accurately defined and compared.

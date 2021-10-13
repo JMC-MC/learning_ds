@@ -11,6 +11,9 @@ library(data.table)
 library(stringr)
 library(lubridate)
 library(ggridges)
+library(ggthemes)
+library(dplyr)
+
 
 # Load edx data frames
 load("movielens_edx.Rda")
@@ -23,41 +26,42 @@ load("movielens_validation.Rda")
 ##################################################
 
   #Completeness Check
-    #Check for NAs and blanks
-      na <- edx[rowSums(is.na(edx)) > 0,] # none
+
+  #Check for NAs and blanks
+    na <- edx[rowSums(is.na(edx)) > 0,] # none
     # Do movies with the same id have different titles
-      unq_mID <- length(unique(edx$movieId)) 
-      unq_title <-length(unique(edx$title)) 
-      diff <- unq_mID - unq_title
+        unq_mID <- length(unique(edx$movieId)) 
+        unq_title <-length(unique(edx$title)) 
+        diff <- unq_mID - unq_title
       # 1 more ID than there is titles, suggesting there is a movie with two IDs
-      ax <- edx %>% group_by(title) %>% summarise(diff = diff(movieId)) %>% filter(diff > 0)
-      wotw <- edx %>% filter(title == ax$title[1]) %>% group_by(movieId) %>% 
-      summarise(no_ratings = n(),title[1])
-      wotw
+        ax <- edx %>% group_by(title) %>% summarise(diff = diff(movieId)) %>% filter(diff > 0)
+        wotw <- edx %>% filter(title == ax$title[1]) %>% group_by(movieId) %>% 
+        summarise(no_ratings = n(),title[1])
+        wotw
       #variable wotw shows that there are two movieIDs for War of the Worlds (2005)
     # The title column contains year data. Check this is true for every title.
-    yr_pattern <- "\\(\\d{4}\\)"
-    title_check <- edx %>% group_by(title) %>% filter(str_detect(title,yr_pattern,negate = TRUE))
+      yr_pattern <- "\\(\\d{4}\\)"
+      title_check <- edx %>% group_by(title) %>% filter(str_detect(title,yr_pattern,negate = TRUE))
     # title check is empty proving that all titles have 
     
   #Function for correcting War of the Worlds (2005) ID
   
-  WotW_corr <- function(df) {
+    WotW_corr <- function(df) {
     df %>% mutate(movieId = replace(movieId, movieId == 64997, 34048))
   }
   #Function extracting movie year
-  ext_year <- function(df) {
+   ext_year <- function(df) {
     df %>% mutate(year = str_sub(str_extract(title,yr_pattern), start = 2L, end = -2L)) %>% 
       mutate(year = as.integer(year))
   }
  
-  # Correct WotW and extract year
+# Correct edx WotW and extract year
   edx_y <- WotW_corr(edx)
   edx_y <- ext_year(edx_y)
   
-    # Correction process for validation
-      validation <- WotW_corr(validation)
-      validation <- ext_year(validation)
+# Correction process for validation
+  validation <- WotW_corr(validation)
+  validation <- ext_year(validation)
 
 ##################################################
       
@@ -65,13 +69,15 @@ load("movielens_validation.Rda")
       
 ##################################################
   # Ratings
+  
     rtngs <- edx_y %>% group_by(rating) %>%
       ggplot(aes(rating)) + geom_bar()
     rtngs
   
   # Reviews per user 
     usr_rev_plot <- edx_y %>% group_by(userId) %>% summarise(no_reviews = n()) %>% 
-      ggplot(aes(no_reviews)) + geom_histogram(bin=2) + xlim(0,1000) 
+      ggplot(aes(no_reviews)) + geom_histogram() + xlim(0,1000) 
+    
     usr_rev_plot
     usr_rev_sum <- edx_y %>% group_by(userId) %>% summarise(no_reviews = n()) %>%
       select(no_reviews) %>% summary()
@@ -84,7 +90,7 @@ load("movielens_validation.Rda")
     mv_rev_plot
     mv_rev_sum <- edx_y %>% group_by(movieId) %>% summarise(no_reviews = n()) %>%
       select(no_reviews) %>% summary()
-    usr_rev_sum
+    mv_rev_sum
   
   # Relationship rating - time of day
   
@@ -93,10 +99,12 @@ load("movielens_validation.Rda")
     ggplot(., aes(x=hour)) + 
     geom_line(aes(y = avg), color = "red") + 
     geom_line(aes(y = sd), color="steelblue")
-  
+
   # Relationship rating - genre
     genres_rts <-  edx_y %>% group_by(genres) %>% 
       summarise(avg_rating=mean(rating), no_reviews = n(), no_movies = length(unique(movieId)))
+    genres_rts
+    edx_y %>% filter(!str_detect(genres,"\\|")) %>% group_by(genres) %>% summarise(mean(rating))
     # lowest avg rating by genre
       genres_rts %>% arrange(by=avg_rating) %>% slice(1:10)
 
@@ -224,6 +232,8 @@ load("movielens_validation.Rda")
   }
   
   RMSE(validation$rating, y_hat$p_rating)
+  
+  # 0.8645887
 
 ##################################################
   
@@ -303,7 +313,9 @@ load("movielens_validation.Rda")
   q2_1 <- nrow(edx[edx$rating == 0])
   q2_2 <- nrow(edx[edx$rating == 3])
   q3 <- length(unique(edx$movieId))
+  q3
   q4 <- length(unique(edx$userId))
+  q4
   q5 <- edx %>% filter(str_detect(genres,"Romance"))
   q6 <- edx %>% group_by(rating) %>% summarise(no = n()) %>% arrange(by= desc(no))
   q7 <- edx %>% group_by(rating) %>% summarise(no_ratings = n()) %>% arrange(by= desc(no_ratings))
